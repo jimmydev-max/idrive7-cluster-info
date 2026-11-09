@@ -64,7 +64,7 @@ const overMap = (r) => r.x < MAP.x + MAP.w && r.x + r.w > MAP.x && r.y < MAP.y +
  * the gear's letter sit along the bottom, and while a layout is up the KOMBI leaves a dark box where the stock
  * gear readout was (right of centre). Layouts keep their readings out of these.
  */
-const NOTCH = { x: 730, y: 0, w: 460, h: 128 };
+const NOTCH = { x: 0, y: 0, w: 0, h: 0 };
 /* the KOMBI's own bracket where its gear readout was (measured from a photo of the car: a thick grey bar on
  * top with a slanted left end, a thick bar on the right, a thin line at the bottom, black inside, at about
  * x 1490-1652, y 271-442), with a margin; drawn over us, so kept clear and dressed by boxBezel() */

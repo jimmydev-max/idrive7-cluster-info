@@ -209,6 +209,10 @@
         [
           "track",
           "Track"
+        ],
+        [
+          "m4_track",
+          "M4 Track"
         ]
       ]
     },

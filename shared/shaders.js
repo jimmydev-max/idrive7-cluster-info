@@ -764,4 +764,163 @@ void main() {
     gl_FragColor = vec4(a > 0.0 ? min(col / max(a, 0.001), vec3(1.0)) : vec3(0.0), a);
 }`;
 
-module.exports = { HIGHP, COMMON, GLYPH, FLAT_FS, PANEL_FS, DIAL_FS, BAND_FS, TEXT_FS, BG_FS, ICON_FS, SPARK_FS, CAR_FS, LEDS_FS, FLAG_FS, EAGLE_FS, FIREWORKS_FS };
+
+const RPMBAR_FS = `#version 100
+${HIGHP}${COMMON}
+uniform vec2 u_size;
+uniform float u_value;
+uniform float u_caution;
+uniform float u_red;
+uniform float u_flash;
+uniform float u_round;      /* corner radius px (0 = sharp rectangle) */
+uniform highp float u_time;
+uniform vec3 u_track;
+uniform vec3 u_fill;
+uniform vec3 u_amber;
+uniform vec3 u_redc;
+uniform vec3 u_lead;
+varying vec2 v_uv;
+float rrectR(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
+void main() {
+    vec2 p = v_uv * u_size;
+    vec2 hh = u_size * 0.5;
+    float dist = rrectR(p - hh, hh, u_round);
+    float inside = clamp(0.5 - dist, 0.0, 1.0);
+    if (inside <= 0.0) { gl_FragColor = vec4(0.0); return; }
+    float v = clamp(u_value, 0.0, 1.0);
+    float t = p.x / u_size.x;
+    vec3 tc = t >= u_red ? mix(u_track, u_redc, 0.20) : t >= u_caution ? mix(u_track, u_amber, 0.16) : u_track;
+    vec3 fc = v >= u_red ? u_redc : v >= u_caution ? u_amber : u_fill;
+    float blink = u_flash > 0.5 ? step(fract(u_time * (v >= u_red ? 6.0 : 3.0)), 0.5) : 1.0;
+    float lit = t <= v ? 1.0 : 0.0;
+    vec3 col = mix(tc, fc, lit * blink);
+    float fx = u_size.x * v;
+    col = mix(col, u_lead, clamp(1.6 - abs(p.x - fx), 0.0, 1.0) * (v > 0.003 ? 1.0 : 0.0));
+    gl_FragColor = vec4(col, inside);
+}`;
+
+/**
+ * A g-force meter: two dashed rings (inner ~1 g, outer the scale's edge) with a gap at the top for the labels,
+ * a faint crosshair, and a dot at u_g (lateral, longitudinal as a fraction of the outer ring, -1..1).
+ */
+const GFORCE_FS = `#version 100
+${HIGHP}${COMMON}
+uniform vec2 u_size;
+uniform vec2 u_g;
+uniform vec3 u_ring;
+uniform vec3 u_ring2;
+uniform vec3 u_cross;
+uniform vec3 u_dot;
+varying vec2 v_uv;
+void main() {
+    vec2 c = u_size * 0.5;
+    vec2 d = v_uv * u_size - c;
+    float R = min(u_size.x, u_size.y) * 0.5 - 6.0;
+    float Ri = R * 0.56;
+    float r = length(d);
+    float ang = atan(d.x, -d.y);
+    vec4 acc = vec4(0.0);
+    float cross = clamp(1.0 - abs(d.x), 0.0, 1.0) + clamp(1.0 - abs(d.y), 0.0, 1.0);
+    acc = over(acc, u_cross, clamp(cross, 0.0, 1.0) * (r < R ? 0.5 : 0.0));
+    float dash = step(0.5, fract(ang / 0.3491));
+    float gapO = step(0.314, abs(ang));
+    float gapI = step(0.384, abs(ang));
+    acc = over(acc, u_ring, dash * gapO * clamp(1.6 - abs(r - R), 0.0, 1.0));
+    acc = over(acc, u_ring2, dash * gapI * clamp(1.3 - abs(r - Ri), 0.0, 1.0));
+    vec2 dp = clamp(u_g, -1.1, 1.1) * R;
+    acc = over(acc, u_dot, clamp(9.0 - length(d - dp), 0.0, 1.0));
+    gl_FragColor = acc;
+}`;
+
+/**
+ * A vertical bar filled from the bottom to u_value, with up to three tick marks across it (u_marks, fractions
+ * 0..1, -1 for none; u_redmark a bit field marking which ticks are red: 1, 2, 4).
+ */
+const VBAR_FS = `#version 100
+${HIGHP}${COMMON}
+uniform vec2 u_size;
+uniform float u_value;
+uniform vec4 u_marks;
+uniform float u_redmark;
+uniform vec3 u_track;
+uniform vec3 u_fill;
+uniform vec3 u_tick;
+uniform vec3 u_redc;
+varying vec2 v_uv;
+float rrect(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
+void main() {
+    vec2 p = v_uv * u_size;
+    vec2 h = u_size * 0.5;
+    float rad = min(u_size.x * 0.5, 6.0);
+    float dist = rrect(p - h, h, rad);
+    float inside = clamp(0.5 - dist, 0.0, 1.0);
+    if (inside <= 0.0) { gl_FragColor = vec4(0.0); return; }
+    float v = clamp(u_value, 0.0, 1.0);
+    float fy = u_size.y * (1.0 - v);
+    vec3 col = mix(u_track, u_fill, clamp(p.y - fy + 0.5, 0.0, 1.0));
+    for (int i = 0; i < 3; i++) {
+        float m = i == 0 ? u_marks.x : i == 1 ? u_marks.y : u_marks.z;
+        if (m >= 0.0) {
+            float my = u_size.y * (1.0 - m);
+            float on = clamp(1.4 - abs(p.y - my), 0.0, 1.0);
+            float red = mod(floor(u_redmark / pow(2.0, float(i)) + 0.001), 2.0);
+            col = mix(col, red > 0.5 ? u_redc : u_tick, on);
+        }
+    }
+    gl_FragColor = vec4(col, inside);
+}`;
+
+/**
+ * RPM tick scale (the info view): minor ticks every 200 rpm (none at the thousands - the numbers mark those),
+ * a light-grey rounded fill from the left to the current rpm, amber ticks from the caution fraction and red from
+ * the red fraction. u_value is the current rpm as a fraction of the scale; u_max the scale top in thousands.
+ */
+const RPMSCALE_FS = `#version 100
+${HIGHP}${COMMON}
+uniform vec2 u_size;
+uniform float u_value;
+uniform float u_max;
+uniform float u_caution;
+uniform float u_red;
+uniform float u_round;
+uniform float u_pad;       /* left/right margin px: number 0 sits at u_pad, number u_max at u_size.x - u_pad */
+uniform highp float u_time;
+uniform float u_flash;
+uniform vec3 u_track;
+uniform vec3 u_fill;
+uniform vec3 u_amber;
+uniform vec3 u_redc;
+varying vec2 v_uv;
+float rrectR(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
+void main() {
+    vec2 p = v_uv * u_size;
+    float usable = u_size.x - 2.0 * u_pad;     /* span from number 0 to number u_max */
+    float local = p.x - u_pad;                 /* 0 at number 0, usable at number u_max */
+    float f = clamp(local / usable, 0.0, 1.0);
+    float v = clamp(u_value, 0.0, 1.0);
+    /* rounded grey fill from the left edge to the current rpm */
+    float fx = u_pad + v * usable;
+    float fdist = rrectR(p - vec2(fx * 0.5, u_size.y * 0.5), vec2(fx, u_size.y) * 0.5, min(u_round, fx * 0.5));
+    float fillM = clamp(0.5 - fdist, 0.0, 1.0);
+    /* minor ticks every 200 rpm, evenly between the numbers; none at a thousand (the numbers mark those) */
+    float majW = usable / u_max;
+    float minW = majW / 5.0;
+    float cy = u_size.y * 0.5;
+    float dmin = abs(fract(local / minW + 0.5) - 0.5) * minW;
+    float idx = floor(local / minW + 0.5);
+    float m5 = mod(idx, 5.0);
+    float isMajor = clamp(step(m5, 0.5) + step(4.5, m5), 0.0, 1.0);
+    float inRange = step(-minW * 0.5, local) * step(local, usable + minW * 0.5);
+    float tickOn = (1.0 - smoothstep(0.55, 1.45, dmin)) * step(abs(p.y - cy), u_size.y * 0.34) * (1.0 - isMajor) * inRange;
+    if (tickOn <= 0.0 && fillM <= 0.0) { gl_FragColor = vec4(0.0); return; }
+    float eps = 0.0001;
+    vec3 zone = f >= u_red - eps ? u_redc : f >= u_caution - eps ? u_amber : u_track;
+    float blink = (u_flash > 0.5 && f >= u_caution - eps) ? step(fract(u_time * (f >= u_red ? 6.0 : 3.0)), 0.5) : 1.0;
+    vec3 onGrey = vec3(0.10, 0.11, 0.12);
+    vec3 tickCol = mix(zone * blink, onGrey, fillM);
+    float a = max(fillM, tickOn);
+    vec3 col = mix(u_fill, tickCol, tickOn / max(a, eps));
+    gl_FragColor = vec4(col, a);
+}`;
+
+module.exports = { HIGHP, COMMON, GLYPH, FLAT_FS, PANEL_FS, DIAL_FS, BAND_FS, TEXT_FS, BG_FS, ICON_FS, SPARK_FS, CAR_FS, LEDS_FS, FLAG_FS, EAGLE_FS, FIREWORKS_FS, RPMBAR_FS, GFORCE_FS, VBAR_FS, RPMSCALE_FS };
